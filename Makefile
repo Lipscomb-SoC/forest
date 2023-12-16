@@ -8,9 +8,9 @@ default:
 	$(CC) $(CFLAGS) -o $(TARGET) $(CFILES)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) test
 
 run: default
 	./$(TARGET)
 
-all: default
+all: default test

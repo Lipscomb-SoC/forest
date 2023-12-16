@@ -5,22 +5,21 @@
 #include "items.h"
 #include "inter.h"
 static void parse_input(char *line);
-static int is_okay_quit(void);
 static void display_help(void);
 static void quit_screen(void);
 static void bad_ending(void);
 static void good_ending(void);
 int GAME_STATUS;
 
-#define LINENOISE_MAX_LINE 80
+#define READLINE_MAX_LINE 80
 
 static char *readline(const char *prompt) {
-    char buf[LINENOISE_MAX_LINE];
+    char buf[READLINE_MAX_LINE];
 	size_t len;
 
 	printf("%s",prompt);
 	fflush(stdout);
-	if (fgets(buf,LINENOISE_MAX_LINE,stdin) == NULL) return NULL;
+	if (fgets(buf,READLINE_MAX_LINE,stdin) == NULL) return NULL;
 	len = strlen(buf);
 	while(len && (buf[len-1] == '\n' || buf[len-1] == '\r')) {
 		len--;
@@ -85,7 +84,7 @@ static void parse_input(char *line)
 	
 	/* user quit */
 	else if (strcmp(*words,"quit") == 0 || strcmp(*words,"exit") == 0 || strcmp(*words,"q") == 0) {
-		if (is_okay_quit()) GAME_STATUS = -1;
+		GAME_STATUS = -1;
 	}
 
 	/* user help */
@@ -156,30 +155,6 @@ static void parse_input(char *line)
 		}
 		printf("'.\n");
 	}
-}
-
-static int is_okay_quit(void)
-{
-	int c;
-	int d;
-
-	printf("\nReally quit? (y/n) ");
-
-	/* get input until user hits enter or EOF; only capture 1st char entered */
-	d = getchar();
-	while ((c = getchar()) != EOF && c != '\n');
-
-	/* if last character was not \n, new line needs to be output */
-	/* also necessary to clearerr here so quit can be called again - only seems
-	 * to happen in FreeBSD, both with clang and gcc */
-	if (c == EOF) {
-		putchar('\n');
-		clearerr(stdin);
-	}
-
-	/* if they entered 'y', quit */
-	return d == 'y' || d == 'Y';
-
 }
 
 static void display_help(void)
