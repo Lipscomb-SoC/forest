@@ -1,16 +1,10 @@
-TARGET=forest
-CC?=gcc
-CFLAGS=-O3 -Wall
+CFLAGS=-Wall -g
+CPPFLAGS=-Wall -g
 
-CFILES=main.c input.c rooms.c items.c inter.c
+all: forest explore
 
-default:
-	$(CC) $(CFLAGS) -o $(TARGET) $(CFILES)
+forest: main.c input.c rooms.c items.c inter.c
+	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
-	rm -f $(TARGET) test
-
-run: default
-	./$(TARGET)
-
-all: default test
+	rm -f forest explore
