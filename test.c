@@ -13,10 +13,10 @@ void die(const char *msg)
     exit(1);
 }
 
-int main(int argc,char *argv[])
-{
-    if (argc < 2) die("usage: run_advent <command>");
+char buf[16*1024];
 
+int main()
+{
     int inpipe[2];
     int outpipe[2];
     if (pipe(inpipe) || pipe(outpipe)) die("pipe creation failed");
@@ -33,28 +33,37 @@ int main(int argc,char *argv[])
         close(inpipe[0]);
         close(outpipe[1]);
         // parent: 
-        // copy stdin to inpipe[1] until end, then send command line
-        // ignore outpipe[0] during stdin, copy outpipe to stdout
-        char buf[4096];
-        int len;
-        while ((len=read(0,buf,sizeof(buf))) > 0) {
-            if (write(inpipe[1],buf,len) != len) die("write to game stdin failed");
+        // copy stdin to inpipe[1] except last line, ignore outpipe[0] 
+        // send last line, copy outpipe to stdout
+        
+        // read all of stdin, find beginning of last line
+        int len = read(0,buf,sizeof(buf));
+        char *s = strrchr(buf,'\n');
+        if (s[1]) {
+            // next char is not null, so append a newline, s points to last line
+            strcat(buf,"\n");
+            s++;
         }
-        usleep(100000);
+        else {
+            // this is the end, so backup to beginning of line
+            while (s>buf && s[-1]!='\n')
+                s--;
+            s++;
+        }
 
-        while ((len=read(outpipe[0],buf,sizeof(buf))) > 0)
+        // write all commands to game input
+        if (write(inpipe[1],buf,s-buf) != s-buf) die("write to game stdin failed");
+        
+        // give it chance to compute, ignore game output
+        usleep(100000); // 0.1 seconds
+        char dummy[1024];
+        while ((len=read(outpipe[0],dummy,sizeof(dummy))) > 0)
             ; //if (write(1,buf,len) != len) die("copying stdout failed");
 
-        buf[0] = 0;
-        for (int i=1; i<argc; i++) {
-            strcat(buf,argv[i]);
-            strcat(buf," ");
-        }
-        buf[strlen(buf)-1] = '\n';
-        buf[strlen(buf)-1] = 0;
-        if (write(inpipe[1],buf,strlen(buf)) != strlen(buf)) die("writing command failed");
+        // write last line to game
+        if (write(inpipe[1],s,strlen(s)) != strlen(s)) die("writing final line failed");
         close(inpipe[1]);
-        usleep(100000);
+        usleep(100000); // 0.1 seconds
 
         while ((len=read(outpipe[0],buf,sizeof(buf))) > 0)
             if (write(1,buf,len) !=len) die("writing stdout failed");
@@ -62,7 +71,9 @@ int main(int argc,char *argv[])
         kill(pid,SIGKILL);
     }
     else {
-        // child: read from inpipe[0]; write to outpipe[1]
+        // child:
+        // read from inpipe[0]
+        // write to outpipe[1]
         if (dup2(inpipe[0],0)==-1 || dup2(outpipe[1],1)==-1) die("file dup'ing failed");
         close(inpipe[1]);
         close(inpipe[0]);

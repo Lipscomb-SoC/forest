@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "rooms.h"
 #include "items.h"
 #include "inter.h"
@@ -17,7 +18,7 @@ static char *readline(const char *prompt) {
     char buf[READLINE_MAX_LINE];
 	size_t len;
 
-	printf("%s",prompt);
+	if (isatty(0)) printf("%s",prompt);
 	fflush(stdout);
 	if (fgets(buf,READLINE_MAX_LINE,stdin) == NULL) return NULL;
 	len = strlen(buf);
