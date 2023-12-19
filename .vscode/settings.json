@@ -47,5 +47,6 @@
         "streambuf": "cpp",
         "cinttypes": "cpp",
         "typeinfo": "cpp"
-    }
+    },
+    "C_Cpp.default.cppStandard": "gnu++20"
 }

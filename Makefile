@@ -1,5 +1,5 @@
 CFLAGS=-Wall -g
-CPPFLAGS=-Wall -g
+CPPFLAGS=-Wall -g -std=gnu++20
 
 all: forest explore
 
