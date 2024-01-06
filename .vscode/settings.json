@@ -46,7 +46,9 @@
         "stdexcept": "cpp",
         "streambuf": "cpp",
         "cinttypes": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "queue": "cpp",
+        "set": "cpp"
     },
     "C_Cpp.default.cppStandard": "gnu++20"
 }

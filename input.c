@@ -14,11 +14,11 @@ int GAME_STATUS;
 
 #define READLINE_MAX_LINE 80
 
-static char *readline(const char *prompt) {
+static char *readline() {
     char buf[READLINE_MAX_LINE];
 	size_t len;
 
-	if (isatty(0)) printf("%s",prompt);
+	printf("command> ");
 	fflush(stdout);
 	if (fgets(buf,READLINE_MAX_LINE,stdin) == NULL) return NULL;
 	len = strlen(buf);
@@ -40,7 +40,7 @@ extern void input_loop(void)
 	GAME_STATUS = 0;
 
 	/* main input loop */
-	while(putchar('\n') && (line = readline("command> ")) != NULL) {
+	while(putchar('\n') && (line = readline()) != NULL) {
 		if (line[0] != '\0') {
 			parse_input(line);
 			if (GAME_STATUS == -1) {

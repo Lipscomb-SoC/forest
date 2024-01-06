@@ -11,12 +11,15 @@
 #include <set>
 #include <queue>
 #include <vector>
+#include <algorithm>
 using std::string;
 using std::string_view;
 using std::map;
 using std::set;
 using std::queue;
 using std::vector;
+using std::pair;
+using std::ranges::count;
 
 void die(const char *msg)
 {
@@ -24,7 +27,53 @@ void die(const char *msg)
     exit(1);
 }
 
-string run(string setup,string command)
+struct state_t {
+    string      location;   // description
+    set<string> items;      // list of items
+
+    std::strong_ordering operator<=>(const state_t &other) const {
+        if (auto c = location <=> other.location; c!=0) return c;
+        return items <=> other.items;
+    };
+};
+
+struct response_t {
+    string      response;   // response to last command
+    state_t     state;
+
+    std::strong_ordering operator<=>(const response_t &other) const {
+        if (auto c = response <=> other.response; c!=0) return c;
+        return state <=> other.state;
+    };
+};
+
+string exchange(int in,int out,string msg,int extra=0)
+{
+    assert(msg=="" || msg.back()=='\n');
+
+    // write msg to game input (inpipe[1])
+    if (write(in,msg.c_str(),msg.length()) != (int)msg.length()) die("writing to game failed");
+
+    // poll for data until the prompt shows up
+    const string prompt = "\ncommand> ";
+    string response;
+    int loops = 0;
+    while (1) {
+        char buf[4096];
+        ssize_t len = read(out,buf,sizeof(buf)-1);
+        if (len > 0) {
+            buf[len] = 0;
+            response += buf;
+        }
+        else
+            loops++;
+        if (loops>extra && response.ends_with(prompt))
+            return response.substr(0,response.length()-prompt.length());
+        usleep(10000); // 0.01 seconds
+    }
+}
+
+response_t run(string setup,string command)
 {
     assert(setup=="" || setup.back()=='\n');
     assert(command.back()=='\n');
@@ -38,35 +87,30 @@ string run(string setup,string command)
     fcntl(outpipe[0],F_SETPIPE_SZ,1024*1024);
     if (fcntl(outpipe[0], F_SETFL, O_NONBLOCK) < 0) die("set nonblocking failed");
 
-    string result;
+    response_t r;
+    string items;
     pid_t pid = fork();
     if (pid < 0)
         die("fork failed");
     else if (pid > 0) {
         close(inpipe[0]);
         close(outpipe[1]);
-        // parent: 
-        // send setup to inpipe[1], ignore outpipe[0] 
-        // send command, copy outpipe to result
-        char buf[4096];
+        // parent:
 
-        // write all commands to game input
-        if (write(inpipe[1],setup.c_str(),setup.length()) != (int)setup.length()) die("writing setup failed");
-        
-        // give it a chance to compute, then ignore game output
-        usleep(100000); // 0.1 seconds
-        while (read(outpipe[0],buf,sizeof(buf)) > 0)
-            ;
+        // write setup commands to game input and ignore results
+        exchange(inpipe[1],outpipe[0],setup,2);
 
-        // write command to game
-        if (write(inpipe[1],command.c_str(),command.length()) != (int)command.length()) die("writing command failed");
+        // write new command to game
+        r.response = exchange(inpipe[1],outpipe[0],command);
+
+        // write look command to game (to get current location)
+        r.state.location = exchange(inpipe[1],outpipe[0],"look\n");
+
+        // write inventory command to game (to get item list)
+        items = exchange(inpipe[1],outpipe[0],"inv\n");
+
+        // we're done
         close(inpipe[1]);
-        usleep(100000); // 0.1 seconds
-
-        while (auto len=read(outpipe[0],buf,sizeof(buf)-1)) {
-            buf[len] = 0;
-            result += buf;
-        }
         close(outpipe[0]);
         kill(pid,SIGKILL);
     }
@@ -83,10 +127,34 @@ string run(string setup,string command)
         die("exec failed");
     }
 
-    return result;
+    // parse items string: "Inventory:\n \t ITEM \n \t ITEM \n ..."
+    while (!items.empty()) {
+        auto n = items.find("\t");
+        if (n == string::npos) break;
+
+        // remove upto the first \t
+        items = items.substr(n+1);
+        // upto \n is the next item
+        string item = items.substr(0,items.find("\n"));
+        if (item != "nothing.")
+            r.state.items.insert(item);
+    }
+
+    return r;
 }
 
-set<string> visited;
+/*
+s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); })); 
+s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+*/
+
+struct value_t {
+    string  cmds;       // how we got here
+    string  response;   // last response
+    bool    success;    // was it "good"?
+};
+
+map<state_t,value_t> visited;
 queue<string> todo;
 
 bool you_walk(string_view s) { return s.find("You cannot walk ")==string::npos; }
@@ -159,37 +227,35 @@ int main(int argc,char *argv[])
     }
 
     todo.push("");
-    //visited.insert(std::hash<string>{}(run("","look\n")));
-    visited.insert(run("","look\n"));
+    visited.insert(pair{state_t{"",{}},""});
 
-    int d = 0;
     while (!todo.empty()) {
         auto setup = todo.front(); todo.pop();
-        std::cout << setup; //.length() << " " << std::flush;
+        std::cout << count(setup,'\n') << " " << std::flush;
 
         for (auto c:cmds) {
-            string newcmd = c.cmd + "\n";
-            auto s = run(setup,newcmd);
+            auto newcmd = c.cmd+"\n";
+            auto r = run(setup,newcmd);
             if (verbose)
-                std::cout << setup << newcmd << "--\n" << s << "========\n";
-            if (c.success(s)) {
-                s = s.substr(s.find("\n",1));
-                s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
-                s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
-                //auto h = std::hash<string>{}(s);
-                if (!visited.contains(s)) {
-                    visited.insert(s);
+                std::cout << newcmd << "--\n" << r.response << "========\n";
+            if (!visited.contains(r.state)) {
+                auto good = c.success(r.response);
+                visited.insert(pair{r.state,value_t{setup+newcmd,r.response,good}});
+                if (good && count(setup,'\n') < depth)
                     todo.push(setup+newcmd);
-                }
             }
         }
-
-        d++;
-        if (d >= depth) break;
     }
+    std::cout << std::endl << std::endl;
 
-    for (auto x:visited)
-        std::cout << x << "\n------\n";
+    for (auto const &x:visited) {
+        string seq{x.second.cmds};
+        std::ranges::replace(seq,'\n',';');
+        std::cout << seq << " ==> " << x.second.response << x.first.location << "Items:";
+        for (auto const &y:x.first.items)
+            std::cout << ", " << y;
+        std::cout << "\n------\n";
+    }
 
     std::cout << "\n\ntotal places: " << visited.size() << "\n";
 }
