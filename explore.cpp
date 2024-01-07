@@ -147,32 +147,38 @@ response_t run(string setup,string command)
     return r;
 }
 
-vector<string> cmds {
-    "find",
-    "take coin",
-    "take ladder",
-    "take sword",
-    "take statuette",
-    "take key",
-    "take scepter",
-
-    "use hamburger",
-    "use hammer",
-
-    "use red coin kiosk",
-    "use blue coin kiosk",
-    "use green coin kiosk",
-    "use ladder",
-    "use statuette",
-    "use sword statue",
-    "use key",
-    "use scepter",
-
-    "n",
-    "e",
-    "s",
-    "w",
+struct cmd_t {
+    string  cmd;
+    int     used;
 };
+
+vector<cmd_t> cmds {
+    {"find"},
+    {"take coin"},
+    {"take ladder"},
+    {"take sword"},
+    {"take statuette"},
+    {"take key"},
+    {"take scepter"},
+
+    {"use hamburger"},
+    {"use hammer"},
+
+    {"use red coin kiosk"},
+    {"use blue coin kiosk"},
+    {"use green coin kiosk"},
+    {"use ladder"},
+    {"use statuette"},
+    {"use sword statue"},
+    {"use key"},
+    {"use scepter"},
+
+    {"n"},
+    {"e"},
+    {"s"},
+    {"w"},
+};
+vector<int> cmd_counts(cmds.size());
 
 struct responses_t {
     string  pattern;
@@ -182,7 +188,6 @@ struct responses_t {
 };
 
 vector<responses_t> responses{
-    {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",false},
     {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",false},
     {"^\\nThere is no [^\\s]+ here\\.\\n$",false},
     {"^\\nYou can't do that\\.\\n$",false},
@@ -195,7 +200,7 @@ vector<responses_t> responses{
     {"^\\nYou walk down the path",true},
     {"^\\nYou walk (down|up) the stairs",true},
     {"^\\nYou (slowly )?walk deeper ",true},
-    {"^\\nYou (crawl|climb) through ",true},
+    //{"^\\nYou (crawl|climb) through ",true},
     {"^\\nYou (enter|leave|exit) the ",true},
     {"^\\nYou follow the river ",true},
     {"^\\nYou took the [^\\s]+ [^\\s]+\\.\\n$",true},
@@ -283,8 +288,8 @@ int main(int argc,char *argv[])
         if (verbose)
             std::cout << "considering " << semicolons(setup) << ", queue size = " << todo.size() << std::endl;
 
-        for (auto const &cmd:cmds) {
-            auto newcmd = cmd+"\n";
+        for (auto &c:cmds) {
+            auto newcmd = c.cmd+"\n";
             auto r = run(setup,newcmd);
             if (verbose)
                 std::cout << semicolons(newcmd) << "----\n" << r.response << "====\n";
@@ -297,6 +302,7 @@ int main(int argc,char *argv[])
             if (index>=0) {
                 known_responses.insert(pair{setup+newcmd,responses[index].pattern});
                 responses[index].used++;
+                c.used++;
             }
             else
                 unknown_responses.insert(pair{setup+newcmd,r.response});
@@ -346,6 +352,9 @@ int main(int argc,char *argv[])
     }
 
     if (print_responses) {
+        std::cout << "\nCommand usage counts:\n";
+        for (auto const &x:cmds)
+            std::cout << x.used << " " << x.cmd << "\n";
         std::cout << "\nResponse usage counts:\n";
         for (auto const &x:responses)
             std::cout << x.used << " " << x.pattern << "\n";
