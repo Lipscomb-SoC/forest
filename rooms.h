@@ -2,7 +2,6 @@
 #define ROOMS_H
 
 extern int room_id(void);
-extern void room_name(void);
 extern void look_room(void);
 extern void move(char *direction);
 extern int search_desc(void);

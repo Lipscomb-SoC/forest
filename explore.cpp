@@ -30,8 +30,8 @@ void die(const char *msg)
 }
 
 struct state_t {
-    string      location;   // description
-    set<string> items;      // list of items
+    string      location;   // room name
+    set<string> items;      // inventory
 
     std::strong_ordering operator<=>(const state_t &other) const {
         if (auto c = location <=> other.location; c!=0) return c;
@@ -41,7 +41,7 @@ struct state_t {
 
 struct response_t {
     string      response;   // response to last command
-    state_t     state;
+    state_t     state;      // game state (where & what)
 
     std::strong_ordering operator<=>(const response_t &other) const {
         if (auto c = response <=> other.response; c!=0) return c;
@@ -106,7 +106,8 @@ response_t run(string setup,string command)
         r.response = exchange(inpipe[1],outpipe[0],command);
 
         // write look command to game (to get current location)
-        r.state.location = exchange(inpipe[1],outpipe[0],"look\n");
+        auto s = exchange(inpipe[1],outpipe[0],"look\n");
+        r.state.location = s.substr(2,s.find('\n')-2);  // fmt: \n\nPlace Name\n
 
         // write inventory command to game (to get item list)
         items = exchange(inpipe[1],outpipe[0],"inv\n");
@@ -151,33 +152,28 @@ s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::i
 */
 
 vector<string> cmds {
+    "find",
+    "take coin",
+    "take ladder",
+    "take statuette",
+    "take sword",
+    "take key",
+    "take scepter",
+
+    "use red coin kiosk",
+    "use blue coin kiosk",
+    "use green coin kiosk",
+    "use ladder",
+    "use statuette",
+    "use sword statue",
+    "use key gate",
+    "use scepter",
+
     "n",
     "e",
     "s",
     "w",
-    "take coin",
-    "take statuette",
-    "take hammer",
-    "take sword",
-    "take ladder",
-    "take key",
-    "take hamburger",
-    "take secpter",
-    "use red coin",
-    "use blue coin",
-    "use green coin",
-    "use statuette",
-    "use hammer",
-    "use sword",
-    "use ladder",
-    "use key",
-    "use hamburger",
-    "use secpter",
-    "find",
 };
-
-// TODO add initial item locations tracking
-// TODO add "look ITEM" description
 
 vector<regex> bad_responses{
     regex{"^\nYou cannot walk (north|south|east|west)\\."},
@@ -193,15 +189,20 @@ vector<regex> good_responses{
     regex{"^\nYou walk down the path"},
     regex{"^\nYou walk (down|up) the stairs"},
     regex{"^\nYou (slowly )?walk deeper "},
-    regex{"^\nYou crawl through "},
+    regex{"^\nYou (crawl|climb) through "},
     regex{"^\nYou (enter|leave|exit) the "},
+    regex{"\nYou follow the river "},
 
     // find/take items
     regex{" You found the .+!"},
     regex{"^\nYou took the .+\\."},
 
     // use items
+    regex{" It opened up a path you can"}, // hammer
 };
+
+// TODO add initial item locations tracking
+// TODO add "look ITEM" description
 
 string use_commas(string s)
 {

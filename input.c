@@ -35,7 +35,6 @@ extern void input_loop(void)
 	char *line;
 
 	/* Start in room 0 and show it */
-	room_name();
 	look_room();
 	GAME_STATUS = 0;
 
