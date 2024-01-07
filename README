@@ -14,7 +14,7 @@ screen) include:
 	search		find hidden items
 	take		pick up item
 	drop		drop item
-	use			use item or items
+	use		use item or items
 
 In the game are 33 rooms, 22 items, and 45 interactions. I recommend playing it
 before modifying the code.
