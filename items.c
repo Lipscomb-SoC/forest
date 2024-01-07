@@ -54,7 +54,7 @@ extern void search(int room_id)
 			count++;
 			if (items[i].item_adj != NULL)
 				printf("%s ",items[i].item_adj);
-			printf("%s! ",items[i].item_name);
+			printf("%s!",items[i].item_name);
 			items[i].hidden = NO;
 			items[i].location = -1;
 			inventory[i] = 1;

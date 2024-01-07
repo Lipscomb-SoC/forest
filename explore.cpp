@@ -107,7 +107,8 @@ response_t run(string setup,string command)
 
         // write look command to game (to get current location)
         auto s = exchange(inpipe[1],outpipe[0],"look\n");
-        r.state.location = s.substr(1,s.find('\n',2)-1);  // fmt: \nPlace Name\n
+        r.state.location = s;
+        //r.state.location = s.substr(1,s.find('\n',2)-1);  // fmt: \nPlace Name\n
 
         // write inventory command to game (to get item list)
         items = exchange(inpipe[1],outpipe[0],"inv\n");
@@ -146,11 +147,6 @@ response_t run(string setup,string command)
     return r;
 }
 
-/*
-s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); })); 
-s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
-*/
-
 vector<string> cmds {
     "find",
     "take coin",
@@ -169,7 +165,7 @@ vector<string> cmds {
     "use ladder",
     "use statuette",
     "use sword statue",
-    "use key gate",
+    "use key",
     "use scepter",
 
     "n",
@@ -178,43 +174,40 @@ vector<string> cmds {
     "w",
 };
 
-vector<string> bad_responses{
-    "^\\nYou cannot walk (north|south|east|west)\\.\\n$",
-    "^\\nThere is no [^\\s]+ here\\.\\n$",
-    "^\\nYou can't do that\\.\\n$",
-    "^\\nYou carefully search the area. You didn't find anything\\.\\n$",
-    "^\\nYou stealthily inspect the items on the tables\\. You didn't find anything\\.\\n$",
-    "^\\nYou rummage through the junk pile\\. You didn't find anything\\.\\n$"
-    "^\\nYou browse around the shop, looking for merchandise\\. You didn't find anything\\.\\n$"
-    "^\\nThe [^\\s]+ coin does not fit into the [^\\s]+ slot\\.\\n$",
+struct responses_t {
+    string  pattern;
+    bool    good;
+    int     used;
+    regex   re;
 };
-vector<regex> bad_patterns;
 
-vector<string> good_responses{
-    // walking/moving
-    "^\\nYou walk (north|south|east|west)\\.\\n$",
-    "^\\nYou walk east into the thicket",
-    "^\\nYou walk down the path",
-    "^\\nYou walk (down|up) the stairs",
-    "^\\nYou (slowly )?walk deeper ",
-    "^\\nYou (crawl|climb) through ",
-    "^\\nYou (enter|leave|exit) the ",
-    "^\\nYou follow the river ",
+vector<responses_t> responses{
+    {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",false},
+    {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",false},
+    {"^\\nThere is no [^\\s]+ here\\.\\n$",false},
+    {"^\\nYou can't do that\\.\\n$",false},
+    {"^\\nYou carefully search the area. You didn't find anything\\.\\n$",false},
+    {"^\\nYou .*\\. You didn't find anything\\.\\n$",false},
+    {"^\\nThe [^\\s]+ coin does not fit into the [^\\s]+ slot\\.\\n$",false},
 
-    // find/take items
-    " You found the .+!",
-    "^\nYou took the .+\\.",
-
-    // use items
-    " It opened up a path you can", // hammer
-    "^\nYou slide the .+ coin into the slot", 
+    {"^\\nYou walk (north|south|east|west)\\.\\n",true},
+    {"^\\nYou walk east into the thicket",true},
+    {"^\\nYou walk down the path",true},
+    {"^\\nYou walk (down|up) the stairs",true},
+    {"^\\nYou (slowly )?walk deeper ",true},
+    {"^\\nYou (crawl|climb) through ",true},
+    {"^\\nYou (enter|leave|exit) the ",true},
+    {"^\\nYou follow the river ",true},
+    {"^\\nYou took the [^\\s]+ [^\\s]+\\.\\n$",true},
+    {"\\. You found the [^\\s]+ [^\\s]+!\\n",true},
+    {" It opened up a path you can",true},
+    {"^\\nYou slide the [^\\s]+ coin into the slot",true},
 };
-vector<regex> good_patterns;
 
 // TODO add initial item locations tracking
 // TODO add "look ITEM" description
 
-string use_commas(string s)
+string semicolons(string s)
 {
     std::ranges::replace(s,'\n',';');
     return s;
@@ -279,10 +272,8 @@ int main(int argc,char *argv[])
         exit(1);
     }
 
-    for (auto const &x:good_responses)
-        good_patterns.push_back(regex(x));
-    for (auto const &x:bad_responses)
-        bad_patterns.push_back(regex(x));
+    for (auto &r:responses)
+        r.re = r.pattern;
 
     todo.push("");
     visited.insert(pair{state_t{"",{}},""});
@@ -290,34 +281,29 @@ int main(int argc,char *argv[])
     while (!todo.empty()) {
         auto setup = todo.front(); todo.pop();
         if (verbose)
-            std::cout << "considering " << use_commas(setup) << ", queue size = " << todo.size() << std::endl;
+            std::cout << "considering " << semicolons(setup) << ", queue size = " << todo.size() << std::endl;
 
         for (auto const &cmd:cmds) {
             auto newcmd = cmd+"\n";
             auto r = run(setup,newcmd);
             if (verbose)
-                std::cout << use_commas(newcmd) << "----\n" << r.response << "====\n";
+                std::cout << semicolons(newcmd) << "----\n" << r.response << "====\n";
 
-            int good_index = -1;
-            for (size_t i=0; good_index<0 && i<good_patterns.size(); i++)
-                if (std::regex_search(r.response,good_patterns[i]))
-                    good_index = i;
+            int index = -1;
+            for (size_t i=0; index<0 && i<responses.size(); i++)
+                if (std::regex_search(r.response,responses[i].re))
+                    index = i;
 
-            int bad_index = -1;
-            for (size_t i=0; bad_index<0 && i<bad_patterns.size(); i++)
-                if (std::regex_search(r.response,bad_patterns[i]))
-                    bad_index = i;
-
-            if (good_index>=0)
-                known_responses.insert(pair{setup+newcmd,good_responses[good_index]});
-            else if (bad_index>=0)
-                known_responses.insert(pair{setup+newcmd,bad_responses[bad_index]});
+            if (index>=0) {
+                known_responses.insert(pair{setup+newcmd,responses[index].pattern});
+                responses[index].used++;
+            }
             else
                 unknown_responses.insert(pair{setup+newcmd,r.response});
 
             if (!visited.contains(r.state)) {
                 visited.insert(pair{r.state,setup+newcmd});
-                if (good_index<(int)good_patterns.size() && count(setup,'\n') < depth)
+                if (index>=0 && responses[index].good && count(setup,'\n') < depth)
                     todo.push(setup+newcmd);
             }
         }
@@ -341,15 +327,16 @@ int main(int argc,char *argv[])
 
     // reports 
     if (print_items) {
+        std::cout << "\nItems:\n";
         for (auto const &x:items)
             std::cout << x << "\n";
         std::cout << "----\n";
     }
 
     if (print_paths) {
+        std::cout << "\nKnown responses:\n";
         for (auto const &x:known_responses)
-            std::cout << use_commas(x.first) << "\n" << x.second << "\n";
-        std::cout << "----\n";
+            std::cout << semicolons(x.first) << "\n" << x.second << "\n";
     }
 
     if (print_locations) {
@@ -359,9 +346,12 @@ int main(int argc,char *argv[])
     }
 
     if (print_responses) {
+        std::cout << "\nResponse usage counts:\n";
+        for (auto const &x:responses)
+            std::cout << x.used << " " << x.pattern << "\n";
         std::cout << "\nUnknown responses:\n";
         for (auto const &x:unknown_responses)
-            std::cout << use_commas(x.first) << x.second << "----\n";
+            std::cout << semicolons(x.first) << x.second << "----\n";
     }
 
     // consider game states (locations + item sets)
