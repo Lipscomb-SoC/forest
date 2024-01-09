@@ -201,6 +201,8 @@ vector<responses_t> responses{
     {"^\\nThe [^\\s]+ coin does not fit into the [^\\s]+ slot\\.\\n$",false},
     {"^\\nHe doesn't want to eat that\\.\\n$",false},
     {"The way north is blocked!",false},
+    {"CONGRATULATIONS!",false},
+    {"GAME OVER: ",false},
 
     {"^\\nYou walk (north|south|east|west)\\.\\n",true},
     {"^\\nYou walk east into the thicket",true},
@@ -225,7 +227,7 @@ vector<responses_t> responses{
     {"^\\nYou try to climb down the rocky hill",true},
     {"allowing you to ascend the tower to the (east|west)!\\n",true},
     {"^\\nYou exit through the gate.",true},
-    {"Are you sure this is a good idea?",true},
+    {"you sure this is a good idea?",true},
 };
 
 // TODO add initial item locations tracking
