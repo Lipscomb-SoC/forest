@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/wait.h>
 #include <string>
 #include <map>
 #include <set>
@@ -30,7 +31,7 @@ void die(const char *msg)
 }
 
 struct state_t {
-    string      location;   // room name
+    string      location;   // room description
     set<string> items;      // inventory
 
     std::strong_ordering operator<=>(const state_t &other) const {
@@ -54,24 +55,29 @@ string exchange(int in,int out,string msg,int extra=0)
     assert(msg=="" || msg.back()=='\n');
 
     // write msg to game input (inpipe[1])
-    if (write(in,msg.c_str(),msg.length()) != (int)msg.length()) die("writing to game failed");
+    if (write(in,msg.c_str(),msg.length()) != (int)msg.length())
+        return "";
 
-    // poll for data until the prompt shows up
+    // poll for data until the prompt shows up, or EOF
     const string prompt = "\ncommand> ";
     string response;
     int loops = 0;
     while (1) {
         char buf[4096];
         ssize_t len = read(out,buf,sizeof(buf)-1);
-        if (len > 0) {
+        if (len >= 0) {
             buf[len] = 0;
             response += buf;
         }
-        else
+        else if (len < 0)
             loops++;
-        if (loops>extra && response.ends_with(prompt))
-            return response.substr(0,response.length()-prompt.length());
-        usleep(10000); // 0.01 seconds
+        if (loops >= extra) {
+            if (len == 0)
+                return response;
+            if (response.ends_with(prompt))
+                return response.substr(0,response.length()-prompt.length());
+        }
+        usleep(1000); // 0.001 seconds
     }
 }
 
@@ -116,7 +122,8 @@ response_t run(string setup,string command)
         // we're done
         close(inpipe[1]);
         close(outpipe[0]);
-        kill(pid,SIGKILL);
+        kill(pid,SIGKILL); // could send a 'q' command?
+        waitpid(pid,NULL,0);
     }
     else {
         // child:
@@ -156,22 +163,19 @@ vector<cmd_t> cmds {
     {"find"},
     {"take coin"},
     {"take ladder"},
-    {"take sword"},
-    {"take statuette"},
-    {"take key"},
-    {"take scepter"},
 
-    {"use hamburger"},
+    {"use hamburger blacksmith"},
+    {"use hamburger statue"},
     {"use hammer"},
-
     {"use red coin kiosk"},
     {"use blue coin kiosk"},
     {"use green coin kiosk"},
     {"use ladder"},
-    {"use statuette"},
+    {"use statuette blacksmith"},
     {"use sword statue"},
-    {"use key"},
-    {"use scepter"},
+    {"use key gate"},
+    {"use scepter statue"},
+    {"use lever"},
 
     {"n"},
     {"e"},
@@ -191,22 +195,37 @@ vector<responses_t> responses{
     {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",false},
     {"^\\nThere is no [^\\s]+ here\\.\\n$",false},
     {"^\\nYou can't do that\\.\\n$",false},
+    {"^\\nYou cannot take the ladder!\\n$",false},
     {"^\\nYou carefully search the area. You didn't find anything\\.\\n$",false},
-    {"^\\nYou .*\\. You didn't find anything\\.\\n$",false},
+    {" You didn't find anything\\.\\n$",false},
     {"^\\nThe [^\\s]+ coin does not fit into the [^\\s]+ slot\\.\\n$",false},
+    {"^\\nHe doesn't want to eat that\\.\\n$",false},
+    {"The way north is blocked!",false},
 
     {"^\\nYou walk (north|south|east|west)\\.\\n",true},
     {"^\\nYou walk east into the thicket",true},
     {"^\\nYou walk down the path",true},
+    {"^\\nYou walk through the gate\\.",true},
     {"^\\nYou walk (down|up) the stairs",true},
     {"^\\nYou (slowly )?walk deeper ",true},
-    //{"^\\nYou (crawl|climb) through ",true},
+    {"^\\nYou climb through the passage (east|west)\\.\\n",true},
+    {"^\\nYou climb the ladder up the rockslide\\.\\n",true},
     {"^\\nYou (enter|leave|exit) the ",true},
     {"^\\nYou follow the river ",true},
     {"^\\nYou took the [^\\s]+ [^\\s]+\\.\\n$",true},
     {"\\. You found the [^\\s]+ [^\\s]+!\\n",true},
     {" It opened up a path you can",true},
-    {"^\\nYou slide the [^\\s]+ coin into the slot",true},
+    {"^\\nYou (slide|slip) the [^\\s]+ coin into the slot",true},
+    {"^\\nThe blacksmith sees the statuette and his eyes get wide",true},
+    {"^\\nYou swing the giant sword at the statue\\.",true},
+    {"^\\nYou walk into the (north|west|east) thicket\\.",true},
+    {"an underground tunnel that leads north",true},
+    {"^\\nYou climb down the ladder and head (south|north) through the tunnel",true},
+    {" You can now travel (east|north)!",true},
+    {"^\\nYou try to climb down the rocky hill",true},
+    {"allowing you to ascend the tower to the (east|west)!\\n",true},
+    {"^\\nYou exit through the gate.",true},
+    {"Are you sure this is a good idea?",true},
 };
 
 // TODO add initial item locations tracking
@@ -232,7 +251,7 @@ int main(int argc,char *argv[])
     bool print_paths        = false;
     bool print_responses    = false;
     bool print_stats        = false;
-    int depth = 9999;
+    int depth = 75;
 
     for (int i=1; i<argc; i++) {
         string arg(argv[i]);
@@ -262,8 +281,6 @@ int main(int argc,char *argv[])
             help = true;
     }
 
-    //(void)save;
-
     if (help) {
         std::cout << "usage explore [options]\n"
                      "  -h     print this help message, stop\n"
@@ -277,6 +294,8 @@ int main(int argc,char *argv[])
         exit(1);
     }
 
+    signal(SIGPIPE, SIG_IGN);
+    
     for (auto &r:responses)
         r.re = r.pattern;
 
@@ -286,13 +305,13 @@ int main(int argc,char *argv[])
     while (!todo.empty()) {
         auto setup = todo.front(); todo.pop();
         if (verbose)
-            std::cout << "considering " << semicolons(setup) << ", queue size = " << todo.size() << std::endl;
+            std::cout << "sequence length: " << count(setup,'\n') << " , queue size: " << todo.size() << std::endl;
 
         for (auto &c:cmds) {
             auto newcmd = c.cmd+"\n";
             auto r = run(setup,newcmd);
-            if (verbose)
-                std::cout << semicolons(newcmd) << "----\n" << r.response << "====\n";
+            //if (verbose)
+            //    std::cout << semicolons(newcmd) << "----\n" << r.response << "====\n";
 
             int index = -1;
             for (size_t i=0; index<0 && i<responses.size(); i++)
@@ -302,7 +321,7 @@ int main(int argc,char *argv[])
             if (index>=0) {
                 known_responses.insert(pair{setup+newcmd,responses[index].pattern});
                 responses[index].used++;
-                c.used++;
+                if (responses[index].good) c.used++;
             }
             else
                 unknown_responses.insert(pair{setup+newcmd,r.response});

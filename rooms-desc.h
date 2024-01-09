@@ -216,7 +216,7 @@ static struct room locations[] = {
 		"You are walking on a forest path. The path runs south into a clearing. There are\n"
 		"thick, impassable thickets north and south, and a steep rocky wall to the east.",
 		{-1,-1,19,-1},
-		{NULL,"You climb the ladder up the rockslide.","You walk south",NULL},
+		{NULL,"You climb the ladder up the rockslide.","You walk south.",NULL},
 		NULL
 	},
 	{
@@ -348,7 +348,7 @@ static struct room locations[] = {
 		33,
 		"Hidden Temple",
 		"You enter an ancient temple. Tall stone walls rise up around you on all sides,\n"
-		"no ceiling. There is a two-story tall gold throne sitting beside the north wall.",
+		"no ceiling. There is a two-story tall gold bird-man statue beside the north wall.",
 		{-1,-1,32,-1},
 		{NULL,NULL,"You exit through the gate.",NULL},
 		"You walk around the temple, look behind the throne, and even crawl between the\n"
