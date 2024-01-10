@@ -30,26 +30,6 @@ void die(const char *msg)
     exit(1);
 }
 
-struct state_t {
-    string      location;   // room description
-    set<string> items;      // inventory
-
-    std::strong_ordering operator<=>(const state_t &other) const {
-        if (auto c = location <=> other.location; c!=0) return c;
-        return std::lexicographical_compare_three_way(items.begin(),items.end(),other.items.begin(),other.items.end());
-    };
-};
-
-struct response_t {
-    string      response;   // response to last command
-    state_t     state;      // game state (where & what)
-
-    std::strong_ordering operator<=>(const response_t &other) const {
-        if (auto c = response <=> other.response; c!=0) return c;
-        return state <=> other.state;
-    };
-};
-
 string exchange(int in,int out,string msg,int extra=0)
 {
     assert(msg=="" || msg.back()=='\n');
@@ -81,7 +61,12 @@ string exchange(int in,int out,string msg,int extra=0)
     }
 }
 
-response_t run(string setup,string command)
+struct outcome_t {
+    string      response;   // response to last command
+    string      state;      // game state (where & what)
+};
+
+outcome_t run(string setup,string command)
 {
     assert(setup=="" || setup.back()=='\n');
     assert(command.back()=='\n');
@@ -95,7 +80,7 @@ response_t run(string setup,string command)
     fcntl(outpipe[0],F_SETPIPE_SZ,1024*1024);
     if (fcntl(outpipe[0], F_SETFL, O_NONBLOCK) < 0) die("set nonblocking failed");
 
-    response_t r;
+    outcome_t r;
     string items;
     pid_t pid = fork();
     if (pid < 0)
@@ -111,13 +96,8 @@ response_t run(string setup,string command)
         // write new command to game
         r.response = exchange(inpipe[1],outpipe[0],command);
 
-        // write look command to game (to get current location)
-        auto s = exchange(inpipe[1],outpipe[0],"look\n");
-        r.state.location = s;
-        //r.state.location = s.substr(1,s.find('\n',2)-1);  // fmt: \nPlace Name\n
-
-        // write inventory command to game (to get item list)
-        items = exchange(inpipe[1],outpipe[0],"inv\n");
+        // write look/inv commands to game (to get current location)
+        r.state = exchange(inpipe[1],outpipe[0],"look\ninv\n");
 
         // we're done
         close(inpipe[1]);
@@ -136,19 +116,6 @@ response_t run(string setup,string command)
         close(outpipe[1]);
         execl("forest","forest",NULL);
         die("exec failed");
-    }
-
-    // parse items string: "Inventory:\n \t ITEM \n \t ITEM \n ..."
-    while (!items.empty()) {
-        auto n = items.find("\t");
-        if (n == string::npos) break;
-
-        // remove upto the first \t
-        items = items.substr(n+1);
-        // upto \n is the next item
-        string item = items.substr(0,items.find("\n"));
-        if (item != "nothing.")
-            r.state.items.insert(item);
     }
 
     return r;
@@ -182,78 +149,84 @@ vector<cmd_t> cmds {
     {"s"},
     {"w"},
 };
-vector<int> cmd_counts(cmds.size());
 
-struct responses_t {
+struct pattern_t {
     string  pattern;
-    bool    good;
+    bool    stop;
     int     used;
     regex   re;
 };
 
-vector<responses_t> responses{
-    {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",false},
-    {"^\\nThere is no [^\\s]+ here\\.\\n$",false},
-    {"^\\nYou can't do that\\.\\n$",false},
-    {"^\\nYou cannot take the ladder!\\n$",false},
-    {"^\\nYou carefully search the area. You didn't find anything\\.\\n$",false},
-    {" You didn't find anything\\.\\n$",false},
-    {"^\\nThe [^\\s]+ coin does not fit into the [^\\s]+ slot\\.\\n$",false},
-    {"^\\nHe doesn't want to eat that\\.\\n$",false},
-    {"The way north is blocked!",false},
-    {"CONGRATULATIONS!",false},
-    {"GAME OVER: ",false},
+vector<pattern_t> patterns{
+    {"^\\nYou cannot walk (north|south|east|west)\\.\\n$",true},
+    {"^\\nThere is no [^\\s]+ here\\.\\n$",true},
+    {"^\\nYou can't do that\\.\\n$",true},
+    {"^\\nYou cannot take the ladder!\\n$",true},
+    {"^\\nYou carefully search the area. You didn't find anything\\.\\n$",true},
+    {" You didn't find anything\\.\\n$",true},
+    {"^\\nThe [^\\s]+ coin does not fit into the [^\\s]+ slot\\.\\n$",true},
+    {"^\\nHe doesn't want to eat that\\.\\n$",true},
+    {"The way north is blocked!",true},
+    {"CONGRATULATIONS!",true},
+    {"GAME OVER: ",true},
 
-    {"^\\nYou walk (north|south|east|west)\\.\\n",true},
-    {"^\\nYou walk east into the thicket",true},
-    {"^\\nYou walk down the path",true},
-    {"^\\nYou walk through the gate\\.",true},
-    {"^\\nYou walk (down|up) the stairs",true},
-    {"^\\nYou (slowly )?walk deeper ",true},
-    {"^\\nYou climb through the passage (east|west)\\.\\n",true},
-    {"^\\nYou climb the ladder up the rockslide\\.\\n",true},
-    {"^\\nYou (enter|leave|exit) the ",true},
-    {"^\\nYou follow the river ",true},
-    {"^\\nYou took the [^\\s]+ [^\\s]+\\.\\n$",true},
-    {"\\. You found the [^\\s]+ [^\\s]+!\\n",true},
-    {" It opened up a path you can",true},
-    {"^\\nYou (slide|slip) the [^\\s]+ coin into the slot",true},
-    {"^\\nThe blacksmith sees the statuette and his eyes get wide",true},
-    {"^\\nYou swing the giant sword at the statue\\.",true},
-    {"^\\nYou walk into the (north|west|east) thicket\\.",true},
-    {"an underground tunnel that leads north",true},
-    {"^\\nYou climb down the ladder and head (south|north) through the tunnel",true},
-    {" You can now travel (east|north)!",true},
-    {"^\\nYou try to climb down the rocky hill",true},
-    {"allowing you to ascend the tower to the (east|west)!\\n",true},
-    {"^\\nYou exit through the gate.",true},
-    {"you sure this is a good idea?",true},
+    {"^\\nYou walk (north|south|east|west)\\.\\n",false},
+    {"^\\nYou walk east into the thicket",false},
+    {"^\\nYou walk down the path",false},
+    {"^\\nYou walk through the gate\\.",false},
+    {"^\\nYou walk (down|up) the stairs",false},
+    {"^\\nYou (slowly )?walk deeper ",false},
+    {"^\\nYou climb through the passage (east|west)\\.\\n",false},
+    {"^\\nYou climb the ladder up the rockslide\\.\\n",false},
+    {"^\\nYou (enter|leave|exit) the ",false},
+    {"^\\nYou follow the river ",false},
+    {"^\\nYou took the [^\\s]+ [^\\s]+\\.\\n$",false},
+    {"\\. You found the [^\\s]+ [^\\s]+!\\n",false},
+    {" It opened up a path you can",false},
+    {"^\\nYou (slide|slip) the [^\\s]+ coin into the slot",false},
+    {"^\\nThe blacksmith sees the statuette and his eyes get wide",false},
+    {"^\\nYou swing the giant sword at the statue\\.",false},
+    {"^\\nYou walk into the (north|west|east) thicket\\.",false},
+    {"an underground tunnel that leads north",false},
+    {"^\\nYou climb down the ladder and head (south|north) through the tunnel",false},
+    {" You can now travel (east|north)!",false},
+    {"^\\nYou try to climb down the rocky hill",false},
+    {"allowing you to ascend the tower to the (east|west)!\\n",false},
+    {"^\\nYou exit through the gate.",false},
+    {"you sure this is a good idea?",false},
 };
 
 // TODO add initial item locations tracking
 // TODO add "look ITEM" description
 
-string semicolons(string s)
+string pipes(string s)
 {
-    std::ranges::replace(s,'\n',';');
+    std::ranges::replace(s,'\n','|');
     return s;
 }
 
-map<string,string> known_responses;     // command sequence ==> recognition pattern
-map<string,string> unknown_responses;   // command sequence ==> response
-map<state_t,string> visited;            // game state ==> command sequence (that got us here)
-queue<string> todo;
+string newlines(string s)
+{
+    std::ranges::replace(s,'|','\n');
+    return s;
+}
+
+map<string,string> results;     // command sequence ==> recognition pattern
+map<string,string> unknowns;    // command sequence ==> response
+set<string> visited;            // game states (where & what)
+queue<string> todo;             // command sequences to explore
 
 int main(int argc,char *argv[])
 {
     bool verbose            = false;
     bool help               = false;
     bool print_locations    = false;
-    bool print_items        = false;
+    //bool print_items        = false;
     bool print_paths        = false;
-    bool print_responses    = false;
+    bool print_unknowns     = false;
     bool print_stats        = false;
-    int depth = 75;
+    bool test_paths         = false;
+    int depth = 100;
 
     for (int i=1; i<argc; i++) {
         string arg(argv[i]);
@@ -271,67 +244,100 @@ int main(int argc,char *argv[])
             help = true;
         else if (arg == "-l")
             print_locations = true;
-        else if (arg == "-i")
-            print_items = true;
+        // else if (arg == "-i")
+        //     print_items = true;
         else if (arg == "-p")
             print_paths = true;
-        else if (arg == "-r")
-            print_responses = true;
+        else if (arg == "-u")
+            print_unknowns = true;
         else if (arg == "-s")
             print_stats = true;
+        else if (arg == "-t")
+            test_paths = true;
         else
             help = true;
     }
 
+    if (!help
+    &&  !print_locations
+    &&  !print_unknowns
+    &&  !print_paths
+    &&  !print_stats
+    &&  !test_paths
+    &&  !verbose)
+        help = true;
+
+    if (test_paths && (print_locations || print_paths || print_stats || print_unknowns))
+        die("incompatible options\n");
+
     if (help) {
-        std::cout << "usage explore [options]\n"
+        std::cout << "usage explore -t|[options]\n"
                      "  -h     print this help message, stop\n"
                      "  -v     be verbose, trace execution\n"
                      "  -n #   maximum number of commands to use\n"
                      "  -l     print unique locations discovered\n"
-                     "  -i     print items discovered\n"
+                     //"  -i     print items discovered\n"
                      "  -p     print successful paths discovered\n"
-                     "  -r     print paths with unknown responses\n"
-                     "  -s     print statistics\n";
+                     "  -u     print paths with unknown responses\n"
+                     "  -s     print statistics\n"
+                     "  -t     test enumerated paths from stdin";
         exit(1);
     }
 
     signal(SIGPIPE, SIG_IGN);
     
-    for (auto &r:responses)
+    for (auto &r:patterns)
         r.re = r.pattern;
 
-    todo.push("");
-    visited.insert(pair{state_t{"",{}},""});
-
-    while (!todo.empty()) {
-        auto setup = todo.front(); todo.pop();
-        if (verbose)
-            std::cout << "sequence length: " << count(setup,'\n') << " , queue size: " << todo.size() << std::endl;
-
-        for (auto &c:cmds) {
-            auto newcmd = c.cmd+"\n";
-            auto r = run(setup,newcmd);
-            //if (verbose)
-            //    std::cout << semicolons(newcmd) << "----\n" << r.response << "====\n";
-
-            int index = -1;
-            for (size_t i=0; index<0 && i<responses.size(); i++)
-                if (std::regex_search(r.response,responses[i].re))
-                    index = i;
-
-            if (index>=0) {
-                known_responses.insert(pair{setup+newcmd,responses[index].pattern});
-                responses[index].used++;
-                if (responses[index].good) c.used++;
+    if (test_paths) {
+        string cmds,pattern;
+        while (getline(std::cin,cmds) && getline(std::cin,pattern)) {
+            auto i=cmds.rfind('|',cmds.length()-2);
+            auto setup = cmds.substr(0,i+1);
+            auto cmd = cmds.substr(i+1);
+            if (verbose)
+                std::cout << setup << " " << cmd << "\n" << pattern << "\n";
+            auto r = run(newlines(setup),newlines(cmd));
+            if (!std::regex_search(r.response,regex{pattern})) {
+                std::cout << setup << " " << cmd << " produced " << r.response << pattern << " was expected\n\n";
+                exit(1);
             }
-            else
-                unknown_responses.insert(pair{setup+newcmd,r.response});
+        }
+    }
+    else {
+        // go exploring
+        todo.push("");
+        while (!todo.empty()) {
+            auto setup = todo.front(); todo.pop();
+            if (verbose)
+                std::cout << "sequence length: " << count(setup,'\n') << " , queue size: " << todo.size() << std::endl;
 
-            if (!visited.contains(r.state)) {
-                visited.insert(pair{r.state,setup+newcmd});
-                if (index>=0 && responses[index].good && count(setup,'\n') < depth)
-                    todo.push(setup+newcmd);
+            for (auto &c:cmds) {
+                auto newcmd = c.cmd+"\n";
+                auto r = run(setup,newcmd);
+                //if (verbose)
+                //    std::cout << semicolons(newcmd) << "----\n" << r.response << "====\n";
+
+                auto cmds = setup+newcmd;
+                pattern_t * p = nullptr;
+                for (size_t i=0; !p && i<patterns.size(); i++)
+                    if (std::regex_search(r.response,patterns[i].re))
+                        p = &patterns[i];
+
+                if (p) {
+                    results.insert({cmds,p->pattern});
+                    p->used++;
+                    if (!p->stop)
+                        c.used++;
+                }
+                else
+                    unknowns.insert({cmds,r.response});
+
+                if (!visited.contains(r.state)) {
+                    visited.insert(r.state);
+                    if (p && !p->stop && count(cmds,'\n') < depth)
+                        todo.push(cmds);
+                }
             }
         }
     }
@@ -339,58 +345,56 @@ int main(int argc,char *argv[])
         std::cout << std::endl << std::endl;
 
     // create summaries
-    set<string> items;
-    for (auto const &x:visited)
-        for (auto const &y:x.first.items)
-            items.insert(y);
 
-    set<string> paths;
-    for (auto const &x:visited)
-        paths.insert(x.second);
+    // set<string> items;
+    // for (auto const &x:visited)
+    //     for (auto const &y:x.first.items)
+    //         items.insert(y);
+    // regex: Inventory:\n \t item \n \t ...
 
-    set<string> locations;
-    for (auto const &x:visited)
-        locations.insert(x.first.location);
+    map<string,int> locations;
+    for (auto const &s:visited)
+        if (s.length() > 0)
+            locations[s.substr(1,s.find('\n',2)-1)]++;  // fmt: \nPlace Name\n
 
     // reports 
-    if (print_items) {
-        std::cout << "\nItems:\n";
-        for (auto const &x:items)
-            std::cout << x << "\n";
-        std::cout << "----\n";
-    }
+
+    // if (print_items) {
+    //     std::cout << "\nItems:\n";
+    //     for (auto const &x:items)
+    //         std::cout << x << "\n";
+    //     std::cout << "----\n";
+    // }
 
     if (print_paths) {
-        std::cout << "\nKnown responses:\n";
-        for (auto const &x:known_responses)
-            std::cout << semicolons(x.first) << "\n" << x.second << "\n";
+        for (auto const &x:results)
+            std::cout << pipes(x.first) << "\n" << x.second << "\n";
     }
 
     if (print_locations) {
-        std::cout << "\nLocations:\n";
         for (auto const &x:locations)
-            std::cout << x << "\n";
+            std::cout << x.second << " " << x.first << "\n";
     }
 
-    if (print_responses) {
-        std::cout << "\nCommand usage counts:\n";
-        for (auto const &x:cmds)
-            std::cout << x.used << " " << x.cmd << "\n";
-        std::cout << "\nResponse usage counts:\n";
-        for (auto const &x:responses)
-            std::cout << x.used << " " << x.pattern << "\n";
-        std::cout << "\nUnknown responses:\n";
-        for (auto const &x:unknown_responses)
-            std::cout << semicolons(x.first) << x.second << "----\n";
+    if (print_unknowns) {
+        for (auto const &x:unknowns)
+            std::cout << pipes(x.first) << "\n" << pipes(x.second) << "\n";
     }
 
     // consider game states (locations + item sets)
 
     if (print_stats) {
-        std::cout << "items: "              << items.size() << std::endl;
-        std::cout << "paths: "              << paths.size() << std::endl;
+        std::cout << "\n";
+        //std::cout << "items: "              << items.size() << std::endl;
+        std::cout << "discovered paths: "   << results.size() << std::endl;
         std::cout << "locations: "          << locations.size() << std::endl;
         std::cout << "game states: "        << visited.size() << std::endl;
-        std::cout << "unknown responses: "  << unknown_responses.size() << std::endl;
+        std::cout << "unknown responses: "  << unknowns.size() << std::endl;
+        std::cout << "\ncommand usage:\n";
+        for (auto const &x:cmds)
+            std::cout << "  " << x.used << " " << x.cmd << "\n";
+        std::cout << "\npattern usage:\n";
+        for (auto const &x:patterns)
+            std::cout << "  " << x.used << " " << x.pattern << "\n";
     }
 }
